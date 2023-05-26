@@ -1,0 +1,217 @@
+/*
+  Application:
+  - Interface water flow sensor with ESP32 board.
+  
+  Board:
+  - ESP32 Dev Module
+    https://my.cytron.io/p-node32-lite-wifi-and-bluetooth-development-kit
+
+  Sensor:
+  - G 1/2 Water Flow Sensor
+    https://my.cytron.io/p-g-1-2-water-flow-sensor
+ */
+ //-------------------------------------------------------
+ //this is for cloud data upload library commment out if not nessary
+ /*
+ #include <ESP8266WiFi.h>
+ #include <WiFi.h>
+ #include <HTTPClient.h>
+ */
+ //upto this just remove /* */ comment for use this portion
+ 
+#include <SPI.h>                   //edited by meghnad 120523
+#include <Wire.h>                  //edited by meghnad 120523  this is for IIC or I2c
+#include <Adafruit_GFX.h>          //edited by meghnad 120523
+#include <Adafruit_SSD1306.h>      //edited by meghnad 120523
+#define SCREEN_WIDTH 128    // OLED display width, in pixels
+#define SCREEN_HEIGHT 64    // OLED display height, in pixels
+#define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+//this section is for cloud data upload purpose comment out if not nessary
+/*
+String apiKey = "YOUR_API_ID"; // Enter your Write API key from ThingSpeak
+const char *ssid = "WIFI_NAME";     // replace with your wifi ssid and wpa2 key
+const char *pass = "PASSWORD_WIFI";
+const char* server = "WWW.example.com";
+*/
+// upto this for cloud data
+//----------------------------
+#define LED_BUILTIN 2
+#define SENSOR  27
+
+long currentMillis = 0;
+long previousMillis = 0;
+int interval = 1000;
+boolean ledState = LOW;
+//water flow Q(Litre/min)=sensor pulse(Hz)/0.2; for dn50 2"water flow sensor
+//float calibrationFactor = 4.5; // this is for  inch display 
+float calibrationFactor = 0.2; // this is for 1/2 inch display 4.5 but for dn50 its 0.2
+
+volatile byte pulseCount;
+byte pulse1Sec = 0;
+float flowRate;
+float flowRateSpeed;
+float Pulse; //counting pulse
+unsigned int flowMilliLitres;
+unsigned long totalMilliLitres;
+
+void IRAM_ATTR pulseCounter()
+{
+  pulseCount++;
+}
+
+//comment out for wifi acces cloud data upload
+//WiFiClient client; // for wifi client initialize edited 
+
+void setup()
+{
+  Serial.begin(115200);
+//edited this portion
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); //initialize with the I2C addr 0x3C (128x64)
+  display.clearDisplay();
+  delay(10);
+//edited this portion
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(SENSOR, INPUT_PULLUP);
+
+  pulseCount = 0;
+  flowRate = 0.0;
+  Pulse = 0.0; //counting pulse
+  flowRateSpeed =0.0; //user defined meghnad for flow speed meter/sec   
+  flowMilliLitres = 0;
+  totalMilliLitres = 0;
+  previousMillis = 0;
+
+  attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
+}
+
+void loop()
+{
+  currentMillis = millis();
+  if (currentMillis - previousMillis > interval) {
+    
+    pulse1Sec = pulseCount;
+    pulseCount = 0;
+
+    // Because this loop may not complete in exactly 1 second intervals we calculate
+    // the number of milliseconds that have passed since the last execution and use
+    // that to scale the output. We also apply the calibrationFactor to scale the output
+    // based on the number of pulses per second per units of measure (litres/minute in
+    // this case) coming from the sensor.
+    //measure frequency(Hz)=((1000.0 / (millis() - previousMillis)) * pulse1Sec)
+    flowRate = ((1000.0 / (millis() - previousMillis)) * pulse1Sec) / calibrationFactor;
+
+            Pulse= ((1000.0 / (millis() - previousMillis)) * pulse1Sec); //counting pulse
+
+   
+
+
+
+    previousMillis = millis();
+
+    // Divide the flow rate in litres/minute by 60 to determine how many litres have
+    // passed through the sensor in this 1 second interval, then multiply by 1000 to
+    // convert to millilitres.
+    flowMilliLitres = (flowRate / 60) * 1000;
+
+    //https://www.1728.org/flowrate.htm
+       
+     //flowRateSpeed=0.8223*flowRate;// 0.8223 cslibrstion factor for 2 inch sensor (diameter) from L/min -> centimeter/sec for area= 2*3.14*radious(2/2=1inch)
+     flowRateSpeed=0.03334*flowRate;// 0.03334 cslibrstion factor for 2 inch sensor (diameter) from L/min -> feet/sec for area= 2*3.14*radious(2/2=1inch) //edited by 26/5/23 meghnad
+
+    // Add the millilitres passed in this second to the cumulative total
+    totalMilliLitres += flowMilliLitres;
+        
+        
+    // Print the flow rate for this second in litres / minute
+    Serial.print("Flow rate: ");
+    Serial.print(int(flowRate));  // Print the integer part of the variable
+    Serial.print("L/min");
+    Serial.print("\t");       // Print tab space
+
+    //
+    Serial.print("Pulse: ");
+    Serial.print(float(Pulse));  // Print the integer part of the variable
+    Serial.print("Hz");
+    Serial.print("\t");       // Print tab space
+    //
+    //
+    Serial.print("flowRateSpeed: ");
+    Serial.print(float(flowRateSpeed));  // Print the integer part of the variable //edited by 26/5/23 meghnad
+    Serial.print("Ft/S");
+    Serial.print("\t");       // Print tab space
+    //
+
+    //for display we write this code
+    display.clearDisplay();
+    
+    display.setCursor(1,0);  //oled display START POSTION 10-20 WITH TEXT SIZE 2
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.print("ICAR-CIFRI Flow Meter");
+
+    display.setCursor(0,20);  //oled display
+    display.setTextSize(2);
+    display.setTextColor(WHITE);
+    display.print("R:");
+    //display.print(float(flowRate));
+    display.print(float(flowRateSpeed)); //for measure meter/sec speed
+    display.setCursor(100,28);  //oled display
+    display.setTextSize(1);
+    //display.print("L/M");
+    display.print("Ft/S"); //for measure meter/sec speed //edited by 26/5/23 meghnad
+    
+    //for display we write this code
+
+    
+
+    // Print the cumulative total of litres flowed since starting
+    Serial.print("Output Liquid Quantity: ");
+    Serial.print(totalMilliLitres);
+    Serial.print("mL / ");
+    Serial.print(totalMilliLitres / 1000);
+    Serial.println("L");
+
+    //for display we write this code
+    
+    display.setCursor(0,45);  //oled display
+    display.setTextSize(2);
+    display.setTextColor(WHITE);
+    display.print("V:");
+    display.print(totalMilliLitres / 1000); // be causion about nothation like totalLiter or TotalLitere //edited by 26/5/23 meghnad
+    display.setCursor(100,53);  //oled display
+    display.setTextSize(1);
+    display.print("L"); //edited by 26/5/23 meghnad
+    display.display();    
+
+
+    //for display we write this code
+  }
+
+ //if you want to upload live value to server used this code for reference otherwise not requred this section
+ /*
+ if (client.connect(server, 80)) // "184.106.153.149" or api.thingspeak.com
+  {
+    String postStr = apiKey;
+      postStr += "&field1=";
+      postStr += String(float(flowRate));
+      postStr += "&field2=";
+      postStr += String(totalLitres);
+      postStr += "\r\n\r\n";
+    
+    client.print("POST /update HTTP/1.1\n");
+    client.print("Host: api.thingspeak.com\n");
+    client.print("Connection: close\n");
+    client.print("X-THINGSPEAKAPIKEY: " + apiKey + "\n");
+    client.print("Content-Type: application/x-www-form-urlencoded\n");
+    client.print("Content-Length: ");
+    client.print(postStr.length());
+    client.print("\n\n");
+    client.print(postStr);
+   
+  }
+    client.stop();
+    */
+// upto this for cloud
+}
